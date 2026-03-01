@@ -7,6 +7,7 @@ import com.cattrack.app.data.repository.CatRepository
 import com.cattrack.app.data.repository.DeviceRepository
 import com.cattrack.app.util.DateUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -31,6 +32,9 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    // 用 Job 来取消旧的 activity 观察，避免多个收集器叠加
+    private var activityJob: Job? = null
+
     init {
         observeCats()
         observeConnectionState()
@@ -47,7 +51,7 @@ class HomeViewModel @Inject constructor(
                         _uiState.update { it.copy(cats = cats, selectedCat = selected, isLoading = false) }
                         selected?.let { cat ->
                             loadCatData(cat.id)
-                            observeLatestActivity(cat.id)
+                            startObservingActivity(cat.id)
                         }
                     }
             } catch (e: Exception) {
@@ -82,10 +86,18 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private fun observeLatestActivity(catId: Long) {
-        viewModelScope.launch {
-            catRepository.getTodayActivityData(catId).collect { activities ->
-                _uiState.update { it.copy(todayActivities = activities) }
+    private fun startObservingActivity(catId: Long) {
+        // 取消上一个观察，防止多个收集器同时运行
+        activityJob?.cancel()
+        activityJob = viewModelScope.launch {
+            try {
+                catRepository.getTodayActivityData(catId)
+                    .catch { /* ignore */ }
+                    .collect { activities ->
+                        _uiState.update { it.copy(todayActivities = activities) }
+                    }
+            } catch (e: Exception) {
+                // ignore
             }
         }
     }
@@ -109,7 +121,7 @@ class HomeViewModel @Inject constructor(
     fun selectCat(cat: Cat) {
         _uiState.update { it.copy(selectedCat = cat) }
         loadCatData(cat.id)
-        observeLatestActivity(cat.id)
+        startObservingActivity(cat.id)
     }
 
     fun refresh() {
