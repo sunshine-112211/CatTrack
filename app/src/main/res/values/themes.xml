@@ -5,8 +5,8 @@
         <item name="colorPrimary">@color/cat_primary</item>
         <item name="colorPrimaryDark">@color/cat_secondary</item>
         <item name="colorAccent">@color/teal_200</item>
-        <item name="android:statusBarColor">@color/cat_primary</item>
         <item name="android:windowBackground">@color/cat_background</item>
+        <!-- 不在这里设置 statusBarColor，让 enableEdgeToEdge 接管，避免冲突崩溃 -->
     </style>
 
     <!-- Theme for splash/launch -->
