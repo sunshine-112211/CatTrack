@@ -39,13 +39,19 @@ class HomeViewModel @Inject constructor(
 
     private fun observeCats() {
         viewModelScope.launch {
-            catRepository.getAllCats().collect { cats ->
-                val selected = _uiState.value.selectedCat ?: cats.firstOrNull()
-                _uiState.update { it.copy(cats = cats, selectedCat = selected, isLoading = false) }
-                selected?.let { cat ->
-                    loadCatData(cat.id)
-                    observeLatestActivity(cat.id)
-                }
+            try {
+                catRepository.getAllCats()
+                    .catch { e -> _uiState.update { it.copy(error = e.message, isLoading = false) } }
+                    .collect { cats ->
+                        val selected = _uiState.value.selectedCat ?: cats.firstOrNull()
+                        _uiState.update { it.copy(cats = cats, selectedCat = selected, isLoading = false) }
+                        selected?.let { cat ->
+                            loadCatData(cat.id)
+                            observeLatestActivity(cat.id)
+                        }
+                    }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message, isLoading = false) }
             }
         }
     }
