@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CatTrack</string>
+    <string name="notification_channel_name">CatTrack Alerts</string>
+    <string name="notification_channel_desc">Notifications from CatTrack smart litter box</string>
+</resources>
