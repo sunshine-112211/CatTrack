@@ -20,7 +20,7 @@ data class Cat(
 
 data class CatStatus(
     val cat: Cat,
-    val currentActivity: ActivityState = ActivityState.REST,
+    val currentActivity: ActivityState = ActivityState.RESTING,
     val todaySteps: Int = 0,
     val todayActiveMinutes: Int = 0,
     val todaySleepMinutes: Int = 0,
