@@ -29,10 +29,16 @@ class ReportViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            catRepository.getAllCats().collect { cats ->
-                val selected = _uiState.value.selectedCat ?: cats.firstOrNull()
-                _uiState.update { it.copy(cats = cats, selectedCat = selected) }
-                selected?.let { generateReports(it.id) }
+            try {
+                catRepository.getAllCats()
+                    .catch { e -> _uiState.update { it.copy(error = e.message, isLoading = false) } }
+                    .collect { cats ->
+                        val selected = _uiState.value.selectedCat ?: cats.firstOrNull()
+                        _uiState.update { it.copy(cats = cats, selectedCat = selected) }
+                        selected?.let { generateReports(it.id) }
+                    }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(error = e.message, isLoading = false) }
             }
         }
     }
