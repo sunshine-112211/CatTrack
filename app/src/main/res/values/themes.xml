@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Base application theme -->
+    <style name="Theme.CatTrack" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="colorPrimary">@color/cat_primary</item>
+        <item name="colorPrimaryDark">@color/cat_secondary</item>
+        <item name="colorAccent">@color/teal_200</item>
+        <item name="android:statusBarColor">@color/cat_primary</item>
+        <item name="android:windowBackground">@color/cat_background</item>
+    </style>
+
+    <!-- Theme for splash/launch -->
+    <style name="Theme.CatTrack.NoActionBar" parent="Theme.CatTrack">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+</resources>
