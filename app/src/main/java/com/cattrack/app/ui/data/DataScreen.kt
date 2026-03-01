@@ -16,7 +16,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.cattrack.app.data.model.ActivityState
-import com.cattrack.app.ui.components.HealthChart
 import com.cattrack.app.ui.theme.*
 import com.github.mikephil.charting.charts.BarChart
 import com.github.mikephil.charting.charts.LineChart
