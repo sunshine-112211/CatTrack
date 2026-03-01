@@ -25,8 +25,14 @@ import javax.inject.Singleton
 class BleManager @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    private val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
-    private val bluetoothAdapter: BluetoothAdapter? = bluetoothManager.adapter
+    private val bluetoothManager: BluetoothManager? = try {
+        context.getSystemService(Context.BLUETOOTH_SERVICE) as? BluetoothManager
+    } catch (e: Exception) { null }
+
+    private val bluetoothAdapter: BluetoothAdapter? = try {
+        bluetoothManager?.adapter
+    } catch (e: Exception) { null }
+
     private var bluetoothLeScanner: BluetoothLeScanner? = null
     private var bluetoothGatt: BluetoothGatt? = null
 
@@ -48,80 +54,83 @@ class BleManager @Inject constructor(
     private val scannedDeviceMap = mutableMapOf<String, ScannedDevice>()
     private var isScanning = false
 
-    // ---- BLE Scanner Callback ----
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             val device = result.device
-            val name = device.name ?: "Unknown Device"
-            if (!name.contains("CatTrack", ignoreCase = true) &&
-                !name.contains("CT-", ignoreCase = true)
-            ) return
-
-            val scanned = ScannedDevice(
+            val name = try { device.name ?: "CatTrack-${device.address.takeLast(5)}" } catch (e: Exception) { "Unknown" }
+            val scannedDevice = ScannedDevice(
                 name = name,
                 address = device.address,
-                rssi = result.rssi,
-                isConnectable = result.isConnectable
+                rssi = result.rssi
             )
-            scannedDeviceMap[device.address] = scanned
+            scannedDeviceMap[device.address] = scannedDevice
             _scannedDevices.value = scannedDeviceMap.values.toList()
         }
 
         override fun onBatchScanResults(results: MutableList<ScanResult>) {
-            results.forEach { onScanResult(ScanSettings.CALLBACK_TYPE_ALL_MATCHES, it) }
+            results.forEach { onScanResult(0, it) }
         }
 
         override fun onScanFailed(errorCode: Int) {
-            _connectionState.value = ConnectionState.ERROR
+            isScanning = false
+            _connectionState.value = ConnectionState.DISCONNECTED
         }
     }
 
-    // ---- GATT Callback ----
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
             when (newState) {
                 BluetoothProfile.STATE_CONNECTED -> {
                     _connectionState.value = ConnectionState.CONNECTED
-                    gatt.discoverServices()
-                    updateCurrentDevice(gatt.device)
+                    try { gatt.discoverServices() } catch (e: Exception) { }
+                    val device = gatt.device
+                    _currentDevice.value = DeviceInfo(
+                        name = try { device.name ?: "CatTrack" } catch (e: Exception) { "CatTrack" },
+                        address = device.address
+                    )
                 }
                 BluetoothProfile.STATE_DISCONNECTED -> {
                     _connectionState.value = ConnectionState.DISCONNECTED
-                    bluetoothGatt = null
-                }
-                BluetoothProfile.STATE_CONNECTING -> {
-                    _connectionState.value = ConnectionState.CONNECTING
+                    _currentDevice.value = null
+                    try { gatt.close() } catch (e: Exception) { }
                 }
             }
         }
 
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             if (status == BluetoothGatt.GATT_SUCCESS) {
-                enableNotifications(gatt)
-                readBatteryCharacteristic(gatt)
+                try { enableNotifications(gatt) } catch (e: Exception) { }
             }
         }
 
+        override fun onCharacteristicRead(
+            gatt: BluetoothGatt,
+            characteristic: BluetoothGattCharacteristic,
+            status: Int
+        ) {
+            if (characteristic.uuid == BleUuid.BATTERY_LEVEL_CHAR_UUID) {
+                try { _batteryLevel.value = characteristic.value?.firstOrNull()?.toInt() ?: 0 } catch (e: Exception) { }
+            }
+        }
+
+        @Suppress("DEPRECATION")
         override fun onCharacteristicRead(
             gatt: BluetoothGatt,
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray,
             status: Int
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                handleCharacteristicData(characteristic.uuid, value)
+            if (characteristic.uuid == BleUuid.BATTERY_LEVEL_CHAR_UUID) {
+                _batteryLevel.value = value.firstOrNull()?.toInt() ?: 0
             }
         }
 
-        @Deprecated("Deprecated for API < 33")
-        override fun onCharacteristicRead(
+        @Suppress("DEPRECATION")
+        override fun onCharacteristicChanged(
             gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic,
-            status: Int
+            characteristic: BluetoothGattCharacteristic
         ) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                handleCharacteristicData(characteristic.uuid, characteristic.value)
-            }
+            try { _rawDataFlow.tryEmit(characteristic.value ?: return) } catch (e: Exception) { }
         }
 
         override fun onCharacteristicChanged(
@@ -129,56 +138,50 @@ class BleManager @Inject constructor(
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            handleCharacteristicData(characteristic.uuid, value)
-        }
-
-        @Deprecated("Deprecated for API < 33")
-        override fun onCharacteristicChanged(
-            gatt: BluetoothGatt,
-            characteristic: BluetoothGattCharacteristic
-        ) {
-            handleCharacteristicData(characteristic.uuid, characteristic.value)
+            _rawDataFlow.tryEmit(value)
         }
 
         override fun onDescriptorWrite(
             gatt: BluetoothGatt,
             descriptor: BluetoothGattDescriptor,
             status: Int
-        ) {
-            // Descriptor write completed, notification enabled
-        }
+        ) { }
 
-        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) {
-            // MTU updated
-        }
+        override fun onMtuChanged(gatt: BluetoothGatt, mtu: Int, status: Int) { }
     }
 
     // ---- Public API ----
 
     fun startScan() {
         if (isScanning || !isBleEnabled()) return
-        bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
-        scannedDeviceMap.clear()
-        _scannedDevices.value = emptyList()
+        try {
+            bluetoothLeScanner = bluetoothAdapter?.bluetoothLeScanner
+            scannedDeviceMap.clear()
+            _scannedDevices.value = emptyList()
 
-        val settings = ScanSettings.Builder()
-            .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
-            .build()
-
-        val filters = listOf(
-            ScanFilter.Builder()
-                .setServiceUuid(ParcelUuid(BleUuid.CAT_TRACK_SERVICE_UUID))
+            val settings = ScanSettings.Builder()
+                .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
                 .build()
-        )
 
-        bluetoothLeScanner?.startScan(filters, settings, scanCallback)
-        isScanning = true
-        _connectionState.value = ConnectionState.SCANNING
+            val filters = listOf(
+                ScanFilter.Builder()
+                    .setServiceUuid(ParcelUuid(BleUuid.CAT_TRACK_SERVICE_UUID))
+                    .build()
+            )
+
+            bluetoothLeScanner?.startScan(filters, settings, scanCallback)
+            isScanning = true
+            _connectionState.value = ConnectionState.SCANNING
+        } catch (e: Exception) {
+            isScanning = false
+        }
     }
 
     fun stopScan() {
         if (!isScanning) return
-        bluetoothLeScanner?.stopScan(scanCallback)
+        try {
+            bluetoothLeScanner?.stopScan(scanCallback)
+        } catch (e: Exception) { }
         isScanning = false
         if (_connectionState.value == ConnectionState.SCANNING) {
             _connectionState.value = ConnectionState.DISCONNECTED
@@ -187,37 +190,49 @@ class BleManager @Inject constructor(
 
     fun connect(address: String) {
         stopScan()
-        val device = bluetoothAdapter?.getRemoteDevice(address) ?: return
-        _connectionState.value = ConnectionState.CONNECTING
-        bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        try {
+            val device = bluetoothAdapter?.getRemoteDevice(address) ?: return
+            _connectionState.value = ConnectionState.CONNECTING
+            bluetoothGatt = device.connectGatt(context, false, gattCallback, BluetoothDevice.TRANSPORT_LE)
+        } catch (e: Exception) {
+            _connectionState.value = ConnectionState.DISCONNECTED
+        }
     }
 
     fun disconnect() {
-        bluetoothGatt?.disconnect()
-        bluetoothGatt?.close()
+        try {
+            bluetoothGatt?.disconnect()
+            bluetoothGatt?.close()
+        } catch (e: Exception) { }
         bluetoothGatt = null
         _connectionState.value = ConnectionState.DISCONNECTED
     }
 
     fun isConnected(): Boolean = _connectionState.value == ConnectionState.CONNECTED
 
-    fun isBleEnabled(): Boolean = bluetoothAdapter?.isEnabled == true
+    fun isBleEnabled(): Boolean = try { bluetoothAdapter?.isEnabled == true } catch (e: Exception) { false }
 
     suspend fun readBatteryLevel(): Int {
-        val gatt = bluetoothGatt ?: return 0
-        val service = gatt.getService(BleUuid.BATTERY_SERVICE_UUID) ?: return 0
-        val characteristic = service.getCharacteristic(BleUuid.BATTERY_LEVEL_CHAR_UUID) ?: return 0
-        gatt.readCharacteristic(characteristic)
-        return _batteryLevel.value
+        return try {
+            val gatt = bluetoothGatt ?: return 0
+            val service = gatt.getService(BleUuid.BATTERY_SERVICE_UUID) ?: return 0
+            val characteristic = service.getCharacteristic(BleUuid.BATTERY_LEVEL_CHAR_UUID) ?: return 0
+            gatt.readCharacteristic(characteristic)
+            _batteryLevel.value
+        } catch (e: Exception) { 0 }
     }
 
     fun writeCommand(command: ByteArray) {
-        val gatt = bluetoothGatt ?: return
-        val service = gatt.getService(BleUuid.CAT_TRACK_SERVICE_UUID) ?: return
-        val characteristic = service.getCharacteristic(BleUuid.COMMAND_WRITE_CHAR_UUID) ?: return
-        characteristic.value = command
-        characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
-        gatt.writeCharacteristic(characteristic)
+        try {
+            val gatt = bluetoothGatt ?: return
+            val service = gatt.getService(BleUuid.CAT_TRACK_SERVICE_UUID) ?: return
+            val characteristic = service.getCharacteristic(BleUuid.COMMAND_WRITE_CHAR_UUID) ?: return
+            @Suppress("DEPRECATION")
+            characteristic.value = command
+            characteristic.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+            @Suppress("DEPRECATION")
+            gatt.writeCharacteristic(characteristic)
+        } catch (e: Exception) { }
     }
 
     // ---- Private Helpers ----
@@ -227,43 +242,18 @@ class BleManager @Inject constructor(
             BleUuid.CAT_TRACK_SERVICE_UUID to BleUuid.ACTIVITY_NOTIFY_CHAR_UUID,
             BleUuid.CAT_TRACK_SERVICE_UUID to BleUuid.REALTIME_DATA_CHAR_UUID
         ).forEach { (serviceUuid, charUuid) ->
-            val service = gatt.getService(serviceUuid) ?: return@forEach
-            val characteristic = service.getCharacteristic(charUuid) ?: return@forEach
-            gatt.setCharacteristicNotification(characteristic, true)
-            val descriptor = characteristic.getDescriptor(BleUuid.CLIENT_CHARACTERISTIC_CONFIG_UUID)
-            descriptor?.let {
-                it.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-                gatt.writeDescriptor(it)
-            }
+            try {
+                val service = gatt.getService(serviceUuid) ?: return@forEach
+                val characteristic = service.getCharacteristic(charUuid) ?: return@forEach
+                gatt.setCharacteristicNotification(characteristic, true)
+                val descriptor = characteristic.getDescriptor(
+                    UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+                ) ?: return@forEach
+                @Suppress("DEPRECATION")
+                descriptor.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                @Suppress("DEPRECATION")
+                gatt.writeDescriptor(descriptor)
+            } catch (e: Exception) { }
         }
-    }
-
-    private fun readBatteryCharacteristic(gatt: BluetoothGatt) {
-        val service = gatt.getService(BleUuid.BATTERY_SERVICE_UUID) ?: return
-        val characteristic = service.getCharacteristic(BleUuid.BATTERY_LEVEL_CHAR_UUID) ?: return
-        gatt.readCharacteristic(characteristic)
-    }
-
-    private fun handleCharacteristicData(uuid: UUID, data: ByteArray) {
-        when (uuid) {
-            BleUuid.BATTERY_LEVEL_CHAR_UUID -> {
-                if (data.isNotEmpty()) {
-                    _batteryLevel.value = data[0].toInt() and 0xFF
-                }
-            }
-            BleUuid.ACTIVITY_NOTIFY_CHAR_UUID,
-            BleUuid.REALTIME_DATA_CHAR_UUID -> {
-                _rawDataFlow.tryEmit(data)
-            }
-        }
-    }
-
-    private fun updateCurrentDevice(device: BluetoothDevice) {
-        _currentDevice.value = DeviceInfo(
-            deviceId = device.address,
-            deviceName = device.name ?: "CatTrack Device",
-            macAddress = device.address,
-            connectionState = ConnectionState.CONNECTED
-        )
     }
 }
