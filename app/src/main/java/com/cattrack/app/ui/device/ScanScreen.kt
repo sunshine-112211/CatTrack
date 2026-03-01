@@ -14,6 +14,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.cattrack.app.data.model.ConnectionState
 import com.cattrack.app.data.model.ScannedDevice
 import com.cattrack.app.data.repository.DeviceRepository
@@ -34,7 +36,7 @@ class ScanViewModel @Inject constructor(
     fun startScan() = deviceRepository.startScan()
     fun stopScan() = deviceRepository.stopScan()
     fun connect(address: String) {
-        androidx.lifecycle.viewModelScope.launch {
+        viewModelScope.launch {
             deviceRepository.connectDevice(address)
         }
     }
