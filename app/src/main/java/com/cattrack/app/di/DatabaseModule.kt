@@ -23,7 +23,10 @@ object DatabaseModule {
             context,
             AppDatabase::class.java,
             "cattrack.db"
-        ).build()
+        )
+        // 防止旧版本 schema 不兼容导致 IllegalStateException 崩溃
+        .fallbackToDestructiveMigration()
+        .build()
 
     @Provides
     fun provideCatDao(db: AppDatabase): CatDao = db.catDao()
