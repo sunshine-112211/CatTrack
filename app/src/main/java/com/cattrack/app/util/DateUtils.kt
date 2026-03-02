@@ -4,20 +4,29 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 object DateUtils {
-    private val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
-    private val displayDateFormat = SimpleDateFormat("MM月dd日", Locale.getDefault())
-    private val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-    private val fullTimeFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    // SimpleDateFormat is NOT thread-safe; use ThreadLocal to avoid concurrent access issues
+    private val dateFormat: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+    }
+    private val displayDateFormat: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+        SimpleDateFormat("MM月dd日", Locale.getDefault())
+    }
+    private val timeFormat: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+        SimpleDateFormat("HH:mm", Locale.getDefault())
+    }
+    private val fullTimeFormat: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+    }
 
-    fun getTodayDateString(): String = dateFormat.format(Date())
+    fun getTodayDateString(): String = dateFormat.get()!!.format(Date())
 
-    fun formatDate(timestamp: Long): String = dateFormat.format(Date(timestamp))
+    fun formatDate(timestamp: Long): String = dateFormat.get()!!.format(Date(timestamp))
 
-    fun formatDisplayDate(timestamp: Long): String = displayDateFormat.format(Date(timestamp))
+    fun formatDisplayDate(timestamp: Long): String = displayDateFormat.get()!!.format(Date(timestamp))
 
-    fun formatTime(timestamp: Long): String = timeFormat.format(Date(timestamp))
+    fun formatTime(timestamp: Long): String = timeFormat.get()!!.format(Date(timestamp))
 
-    fun formatFullTime(timestamp: Long): String = fullTimeFormat.format(Date(timestamp))
+    fun formatFullTime(timestamp: Long): String = fullTimeFormat.get()!!.format(Date(timestamp))
 
     fun getHourFromTimestamp(timestamp: Long): Int {
         val cal = Calendar.getInstance()
@@ -28,9 +37,9 @@ object DateUtils {
     fun getThisWeekRange(): Pair<String, String> {
         val cal = Calendar.getInstance()
         cal.set(Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
-        val start = dateFormat.format(cal.time)
+        val start = dateFormat.get()!!.format(cal.time)
         cal.add(Calendar.DAY_OF_WEEK, 6)
-        val end = dateFormat.format(cal.time)
+        val end = dateFormat.get()!!.format(cal.time)
         return Pair(start, end)
     }
 
@@ -38,18 +47,18 @@ object DateUtils {
         val cal = Calendar.getInstance()
         cal.add(Calendar.WEEK_OF_YEAR, -1)
         cal.set(Calendar.DAY_OF_WEEK, cal.firstDayOfWeek)
-        val start = dateFormat.format(cal.time)
+        val start = dateFormat.get()!!.format(cal.time)
         cal.add(Calendar.DAY_OF_WEEK, 6)
-        val end = dateFormat.format(cal.time)
+        val end = dateFormat.get()!!.format(cal.time)
         return Pair(start, end)
     }
 
     fun getThisMonthRange(): Pair<String, String> {
         val cal = Calendar.getInstance()
         cal.set(Calendar.DAY_OF_MONTH, 1)
-        val start = dateFormat.format(cal.time)
+        val start = dateFormat.get()!!.format(cal.time)
         cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
-        val end = dateFormat.format(cal.time)
+        val end = dateFormat.get()!!.format(cal.time)
         return Pair(start, end)
     }
 
@@ -57,17 +66,17 @@ object DateUtils {
         val cal = Calendar.getInstance()
         cal.add(Calendar.MONTH, -1)
         cal.set(Calendar.DAY_OF_MONTH, 1)
-        val start = dateFormat.format(cal.time)
+        val start = dateFormat.get()!!.format(cal.time)
         cal.set(Calendar.DAY_OF_MONTH, cal.getActualMaximum(Calendar.DAY_OF_MONTH))
-        val end = dateFormat.format(cal.time)
+        val end = dateFormat.get()!!.format(cal.time)
         return Pair(start, end)
     }
 
     fun getLastNDays(n: Int): Pair<String, String> {
         val cal = Calendar.getInstance()
-        val end = dateFormat.format(cal.time)
+        val end = dateFormat.get()!!.format(cal.time)
         cal.add(Calendar.DAY_OF_YEAR, -(n - 1))
-        val start = dateFormat.format(cal.time)
+        val start = dateFormat.get()!!.format(cal.time)
         return Pair(start, end)
     }
 
@@ -90,7 +99,7 @@ object DateUtils {
 
     fun getDayLabel(dateStr: String): String {
         return try {
-            val date = dateFormat.parse(dateStr) ?: return dateStr
+            val date = dateFormat.get()!!.parse(dateStr) ?: return dateStr
             val cal = Calendar.getInstance().apply { time = date }
             val days = arrayOf("日", "一", "二", "三", "四", "五", "六")
             "周${days[cal.get(Calendar.DAY_OF_WEEK) - 1]}"
