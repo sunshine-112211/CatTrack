@@ -77,9 +77,10 @@ fun CatTrackTheme(
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
-            window.statusBarColor = Color.Transparent.toArgb()
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            // 安全地获取 Activity，避免 ClassCastException
+            val activity = view.context as? Activity ?: return@SideEffect
+            activity.window.statusBarColor = Color.Transparent.toArgb()
+            WindowCompat.getInsetsController(activity.window, view).isAppearanceLightStatusBars = !darkTheme
         }
     }
 
