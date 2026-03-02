@@ -29,6 +29,23 @@ fun DataScreen(
     val uiState by viewModel.uiState.collectAsState()
     val periods = remember { DataPeriod.values().toList() }
 
+    // ★ 所有 remember 必须在任何 return/条件分支之前调用，保证 Compose slot table 稳定
+    val stepsList = remember(uiState.activityDataList) {
+        uiState.activityDataList.map { it.steps.toFloat() }
+    }
+    val sleepList = remember(uiState.activityDataList) {
+        uiState.activityDataList.map { it.sleepMinutes.toFloat() }
+    }
+    val sleepMin = remember(uiState.activityDataList) {
+        uiState.activityDataList.sumOf { it.sleepMinutes }
+    }
+    val activeMin = remember(uiState.activityDataList) {
+        uiState.activityDataList.sumOf { it.activeMinutes }
+    }
+    val restMin = remember(uiState.activityDataList) {
+        uiState.activityDataList.sumOf { it.restMinutes }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -82,29 +99,21 @@ fun DataScreen(
                 DataSummaryCard("睡眠", "${uiState.totalSleepMinutes / 60}h", "", SleepBlue, Modifier.weight(1f))
             }
 
-            // 活动量趋势折线图（纯 Compose Canvas）
-            val stepsList = remember(uiState.activityDataList) {
-                uiState.activityDataList.map { it.steps.toFloat() }
-            }
+            // 活动量趋势折线图
             ChartCard(title = "活动量趋势（步数）") {
-                if (stepsList.isEmpty()) {
+                if (stepsList.size < 2) {
                     EmptyChartPlaceholder()
                 } else {
                     SimpleLineChart(
                         data = stepsList,
                         lineColor = CatOrange,
                         fillColor = CatOrange.copy(alpha = 0.15f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(180.dp)
+                        modifier = Modifier.fillMaxWidth().height(180.dp)
                     )
                 }
             }
 
-            // 睡眠柱状图（纯 Compose Canvas）
-            val sleepList = remember(uiState.activityDataList) {
-                uiState.activityDataList.map { it.sleepMinutes.toFloat() }
-            }
+            // 睡眠柱状图
             ChartCard(title = "睡眠时间分布（分钟）") {
                 if (sleepList.isEmpty()) {
                     EmptyChartPlaceholder()
@@ -112,18 +121,12 @@ fun DataScreen(
                     SimpleBarChart(
                         data = sleepList,
                         barColor = SleepBlue,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(160.dp)
+                        modifier = Modifier.fillMaxWidth().height(160.dp)
                     )
                 }
             }
 
-            // 行为分布饼图（纯 Compose Canvas）
-            val sleepMin = remember(uiState.activityDataList) { uiState.activityDataList.sumOf { it.sleepMinutes } }
-            val activeMin = remember(uiState.activityDataList) { uiState.activityDataList.sumOf { it.activeMinutes } }
-            val restMin = remember(uiState.activityDataList) { uiState.activityDataList.sumOf { it.restMinutes } }
-
+            // 行为分布饼图
             ChartCard(title = "行为分布") {
                 if (sleepMin + activeMin + restMin == 0) {
                     EmptyChartPlaceholder()
@@ -134,9 +137,7 @@ fun DataScreen(
                             PieSegment("活动", activeMin.toFloat(), ActiveGreen),
                             PieSegment("休息", restMin.toFloat(), RestYellow)
                         ),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
+                        modifier = Modifier.fillMaxWidth().height(200.dp)
                     )
                 }
             }
@@ -149,7 +150,7 @@ fun DataScreen(
     }
 }
 
-// -------- 纯 Compose Canvas 图表组件 --------
+// -------- 纯 Compose Canvas 图表 --------
 
 data class PieSegment(val label: String, val value: Float, val color: Color)
 
@@ -160,52 +161,43 @@ private fun SimpleLineChart(
     fillColor: Color,
     modifier: Modifier = Modifier
 ) {
-    if (data.size < 2) {
-        EmptyChartPlaceholder()
-        return
-    }
-    val maxVal = remember(data) { data.max().coerceAtLeast(1f) }
-    val minVal = remember(data) { data.min() }
+    if (data.size < 2) return
+
+    val maxVal = data.max().coerceAtLeast(1f)
+    val minVal = data.min()
 
     Canvas(modifier = modifier) {
+        if (size.width <= 0f || size.height <= 0f) return@Canvas
         val padH = 12.dp.toPx()
         val padV = 12.dp.toPx()
-        val chartW = size.width - padH * 2
-        val chartH = size.height - padV * 2
+        val chartW = (size.width - padH * 2).coerceAtLeast(1f)
+        val chartH = (size.height - padV * 2).coerceAtLeast(1f)
         val range = (maxVal - minVal).coerceAtLeast(1f)
-        val xStep = if (data.size > 1) chartW / (data.size - 1) else chartW
+        val xStep = chartW / (data.size - 1).coerceAtLeast(1)
 
         fun xOf(i: Int) = padH + i * xStep
         fun yOf(v: Float) = padV + chartH * (1f - (v - minVal) / range)
 
-        // 网格线
         repeat(4) { i ->
             val y = padV + chartH * i / 3f
             drawLine(Color.LightGray.copy(alpha = 0.4f), Offset(padH, y), Offset(padH + chartW, y), 1f)
         }
 
-        // 填充区域
         val fillPath = Path().apply {
-            moveTo(xOf(0), size.height - padV)
+            moveTo(xOf(0), padV + chartH)
             lineTo(xOf(0), yOf(data[0]))
-            data.forEachIndexed { i, v ->
-                if (i > 0) lineTo(xOf(i), yOf(v))
-            }
-            lineTo(xOf(data.lastIndex), size.height - padV)
+            data.forEachIndexed { i, v -> if (i > 0) lineTo(xOf(i), yOf(v)) }
+            lineTo(xOf(data.lastIndex), padV + chartH)
             close()
         }
         drawPath(fillPath, fillColor)
 
-        // 折线
         val linePath = Path().apply {
             moveTo(xOf(0), yOf(data[0]))
-            data.forEachIndexed { i, v ->
-                if (i > 0) lineTo(xOf(i), yOf(v))
-            }
+            data.forEachIndexed { i, v -> if (i > 0) lineTo(xOf(i), yOf(v)) }
         }
         drawPath(linePath, lineColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
 
-        // 数据点
         data.forEachIndexed { i, v ->
             drawCircle(lineColor, radius = 4.dp.toPx(), center = Offset(xOf(i), yOf(v)))
             drawCircle(Color.White, radius = 2.dp.toPx(), center = Offset(xOf(i), yOf(v)))
@@ -219,31 +211,32 @@ private fun SimpleBarChart(
     barColor: Color,
     modifier: Modifier = Modifier
 ) {
-    if (data.isEmpty()) {
-        EmptyChartPlaceholder()
-        return
-    }
-    val maxVal = remember(data) { data.max().coerceAtLeast(1f) }
+    if (data.isEmpty()) return
+
+    val maxVal = data.max().coerceAtLeast(1f)
 
     Canvas(modifier = modifier) {
+        if (size.width <= 0f || size.height <= 0f) return@Canvas
         val padH = 8.dp.toPx()
         val padV = 8.dp.toPx()
-        val chartW = size.width - padH * 2
-        val chartH = size.height - padV * 2
-        val totalBars = data.size
-        val barW = (chartW / totalBars) * 0.6f
-        val gap = (chartW / totalBars) * 0.4f / 2
+        val chartW = (size.width - padH * 2).coerceAtLeast(1f)
+        val chartH = (size.height - padV * 2).coerceAtLeast(1f)
+        val slotW = chartW / data.size
+        val barW = slotW * 0.6f
+        val gapX = slotW * 0.2f
 
         data.forEachIndexed { i, v ->
-            val x = padH + i * (chartW / totalBars) + gap
+            val x = padH + i * slotW + gapX
             val barH = (v / maxVal) * chartH
             val y = padV + chartH - barH
-            drawRoundRect(
-                color = barColor,
-                topLeft = Offset(x, y),
-                size = Size(barW, barH),
-                cornerRadius = CornerRadius(3.dp.toPx())
-            )
+            if (barH > 0f) {
+                drawRoundRect(
+                    color = barColor,
+                    topLeft = Offset(x, y),
+                    size = Size(barW, barH),
+                    cornerRadius = CornerRadius(3.dp.toPx())
+                )
+            }
         }
     }
 }
@@ -261,49 +254,47 @@ private fun SimplePieChart(
 
     Box(modifier = modifier) {
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val radius = minOf(size.width, size.height) / 2f * 0.75f
-            val center = Offset(size.width / 2f, size.height / 2f)
+            if (size.width <= 0f || size.height <= 0f) return@Canvas
+            val radius = minOf(size.width, size.height) / 2f * 0.65f
+            val center = Offset(size.width / 2f, size.height / 2f * 0.85f)
             var startAngle = -90f
 
             segments.forEach { seg ->
-                val sweep = (seg.value / total) * 360f
-                drawArc(
-                    color = seg.color,
-                    startAngle = startAngle,
-                    sweepAngle = sweep,
-                    useCenter = true,
-                    topLeft = Offset(center.x - radius, center.y - radius),
-                    size = Size(radius * 2, radius * 2)
-                )
-                startAngle += sweep
+                if (seg.value > 0f) {
+                    val sweep = (seg.value / total) * 360f
+                    drawArc(
+                        color = seg.color,
+                        startAngle = startAngle,
+                        sweepAngle = sweep,
+                        useCenter = true,
+                        topLeft = Offset(center.x - radius, center.y - radius),
+                        size = Size(radius * 2, radius * 2)
+                    )
+                    startAngle += sweep
+                }
             }
-
-            // 中心白圆
             drawCircle(Color.White, radius = radius * 0.5f, center = center)
         }
 
-        // 图例
-        Column(
+        Row(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                segments.forEach { seg ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .background(seg.color, RoundedCornerShape(2.dp))
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            "${seg.label} ${seg.value.toInt()}min",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+            segments.forEach { seg ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(seg.color, RoundedCornerShape(2.dp))
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        "${seg.label} ${seg.value.toInt()}min",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
@@ -374,9 +365,7 @@ private fun ActivityDetailCard(data: com.cattrack.app.data.model.ActivityData) {
         shape = RoundedCornerShape(12.dp)
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(text = state.emoji, fontSize = 24.sp)
@@ -400,9 +389,7 @@ private fun ActivityDetailCard(data: com.cattrack.app.data.model.ActivityData) {
 @Composable
 private fun EmptyChartPlaceholder() {
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(140.dp),
+        modifier = Modifier.fillMaxWidth().height(140.dp),
         contentAlignment = Alignment.Center
     ) {
         Text("暂无数据", color = MaterialTheme.colorScheme.onSurfaceVariant)
